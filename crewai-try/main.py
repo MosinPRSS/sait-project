@@ -1,14 +1,17 @@
 from crewai import Agent, Crew, Task, LLM
-import json, os
+import dotenv, os
 from tools.Searchers import ThesaurusRuWordNetSearch
+dotenv.load_dotenv()
 
 RWN_search_tool = ThesaurusRuWordNetSearch()
 serializer_tool = None
+API_KEY = os.getenv("openai_key")
 
 model = LLM(
-    model="ollama/llama3.2",
-    temperature=0.5,
-    base_url="http://localhost:11434",
+    model="openai/gpt-4",
+    api_key=API_KEY,
+    temperature=0.7,
+    stop=["END"]
 )
 
 agent = Agent(

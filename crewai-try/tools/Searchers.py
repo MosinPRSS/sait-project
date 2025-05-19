@@ -2,7 +2,7 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from typing import Type
-import requests
+import asyncio, httpx
 
 class WordQuery(BaseModel):
     term: str
@@ -14,15 +14,18 @@ class ThesaurusRuWordNetSearch(BaseTool):
     )
     args_schema: Type[BaseModel] = WordQuery
 
-    def _run(self, term: str) -> str:
+    async def _run(self, term: str) -> str:
         url = f"https://ruwordnet.ru/ru/search/{term}"
-
         headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(url, headers=headers)
-        soup = BeautifulSoup(res.text, 'html.parser')
 
-        print(f"[DEBUG] URL: {url}")
-        print("[DEBUG] Response status:", res.status_code)
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                res = await client.get(url, headers=headers)
+                res.raise_for_status()
+        except httpx.RequestError as e:
+            return f"Ошибка подключения к RuWordNet: {e}"
+
+        soup = BeautifulSoup(res.text, 'html.parser')
 
         results = []
         for block in soup.find_all("div", class_="relation"):
@@ -40,5 +43,33 @@ class ThesaurusRuWordNetSearch(BaseTool):
             if title_tag and senses:
                 title = title_tag.text.strip()
                 results.append(f"{title}: {', '.join(senses)}")
+        
+        if results:
+            return await self._summary(results)
+        else:
+            return "Результаты не найдены, попробуйте иначе подобрать слово или измените его"
+    
+    async def _summary(self, lst: list) -> str:
+        prompt = (
+            "Here is collected content which you need to summary into one sentence:\n"
+            f"{', '.join(lst)}\n"
+            "You must return answer in russian only."
+        )
 
-        return "\n".join(results) if results else "Результаты не найдены."
+        json_query = {
+            "model": "qwen3",
+            "content": prompt,
+            "options": {
+                "temperature": 0.7,
+            },
+            "stream": False
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=200) as client:
+                res = await client.post("http://localhost:11434/api/generate", json=json_query)
+                res.raise_for_status()
+                return res.text.strip()
+        except httpx.RequestError as e:
+            return f"Ошибка при генерации саммари: {e}"
+
